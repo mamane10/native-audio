@@ -10,6 +10,7 @@ import static com.getcapacitor.community.audio.Constant.ERROR_AUDIO_EXISTS;
 import static com.getcapacitor.community.audio.Constant.ERROR_AUDIO_ID_MISSING;
 import static com.getcapacitor.community.audio.Constant.LOOP;
 import static com.getcapacitor.community.audio.Constant.OPT_FADE_MUSIC;
+import static com.getcapacitor.community.audio.Constant.OPT_FOCUS_AUDIO;
 import static com.getcapacitor.community.audio.Constant.VOLUME;
 
 import android.Manifest;
@@ -17,6 +18,7 @@ import android.content.Context;
 import android.content.res.AssetFileDescriptor;
 import android.content.res.AssetManager;
 import android.media.AudioManager;
+import android.net.Uri;
 import android.os.ParcelFileDescriptor;
 import android.util.Log;
 import com.getcapacitor.JSObject;
@@ -32,35 +34,35 @@ import java.util.HashMap;
 import java.util.concurrent.Callable;
 
 @CapacitorPlugin(
-  permissions = {
-    @Permission(strings = { Manifest.permission.MODIFY_AUDIO_SETTINGS }),
-    @Permission(strings = { Manifest.permission.WRITE_EXTERNAL_STORAGE }),
-    @Permission(strings = { Manifest.permission.READ_PHONE_STATE }),
-  }
+        permissions = {
+                @Permission(strings = { Manifest.permission.MODIFY_AUDIO_SETTINGS }),
+                @Permission(strings = { Manifest.permission.WRITE_EXTERNAL_STORAGE }),
+                @Permission(strings = { Manifest.permission.READ_PHONE_STATE }),
+        }
 )
 public class NativeAudio
-  extends Plugin
-  implements AudioManager.OnAudioFocusChangeListener {
+        extends Plugin
+        implements AudioManager.OnAudioFocusChangeListener {
 
   public static final String TAG = "NativeAudio";
 
   private static HashMap<String, AudioAsset> audioAssetList;
   private static ArrayList<AudioAsset> resumeList;
   private boolean fadeMusic = false;
+  private AudioManager audioManager;
 
   @Override
   public void load() {
     super.load();
 
-    AudioManager audioManager = (AudioManager) getBridge()
-      .getActivity()
-      .getSystemService(Context.AUDIO_SERVICE);
-
-    if (audioManager != null) {
-      int result = audioManager.requestAudioFocus(
-        this,
-        AudioManager.STREAM_MUSIC,
-        AudioManager.AUDIOFOCUS_GAIN
+    this.audioManager = (AudioManager) getBridge()
+            .getActivity()
+            .getSystemService(Context.AUDIO_SERVICE);
+    if (this.audioManager != null) {
+      this.audioManager.requestAudioFocus(
+              this,
+              AudioManager.STREAM_MUSIC,
+              AudioManager.AUDIOFOCUS_GAIN
       );
     }
   }
@@ -68,7 +70,7 @@ public class NativeAudio
   @Override
   public void onAudioFocusChange(int focusChange) {
     if (focusChange == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {} else if (
-      focusChange == AudioManager.AUDIOFOCUS_GAIN
+            focusChange == AudioManager.AUDIOFOCUS_GAIN
     ) {} else if (focusChange == AudioManager.AUDIOFOCUS_LOSS) {}
   }
 
@@ -92,9 +94,9 @@ public class NativeAudio
       }
     } catch (Exception ex) {
       Log.d(
-        TAG,
-        "Exception caught while listening for handleOnPause: " +
-        ex.getLocalizedMessage()
+              TAG,
+              "Exception caught while listening for handleOnPause: " +
+                      ex.getLocalizedMessage()
       );
     }
   }
@@ -115,9 +117,9 @@ public class NativeAudio
       }
     } catch (Exception ex) {
       Log.d(
-        TAG,
-        "Exception caught while listening for handleOnResume: " +
-        ex.getLocalizedMessage()
+              TAG,
+              "Exception caught while listening for handleOnResume: " +
+                      ex.getLocalizedMessage()
       );
     }
   }
@@ -127,34 +129,46 @@ public class NativeAudio
     initSoundPool();
 
     if (call.hasOption(OPT_FADE_MUSIC)) this.fadeMusic =
-      call.getBoolean(OPT_FADE_MUSIC);
+            call.getBoolean(OPT_FADE_MUSIC);
+
+    if (call.hasOption(OPT_FOCUS_AUDIO) && this.audioManager != null) {
+      if (call.getBoolean(OPT_FOCUS_AUDIO)) {
+        this.audioManager.requestAudioFocus(
+                this,
+                AudioManager.STREAM_MUSIC,
+                AudioManager.AUDIOFOCUS_GAIN
+        );
+      } else {
+        this.audioManager.abandonAudioFocus(this);
+      }
+    }
   }
 
   @PluginMethod
   public void preload(final PluginCall call) {
     new Thread(
-      new Runnable() {
-        @Override
-        public void run() {
-          preloadAsset(call);
-        }
-      }
+            new Runnable() {
+              @Override
+              public void run() {
+                preloadAsset(call);
+              }
+            }
     )
-      .start();
+            .start();
   }
 
   @PluginMethod
   public void play(final PluginCall call) {
     getBridge()
-      .getActivity()
-      .runOnUiThread(
-        new Runnable() {
-          @Override
-          public void run() {
-            playOrLoop("play", call);
-          }
-        }
-      );
+            .getActivity()
+            .runOnUiThread(
+                    new Runnable() {
+                      @Override
+                      public void run() {
+                        playOrLoop("play", call);
+                      }
+                    }
+            );
   }
 
   @PluginMethod
@@ -173,7 +187,7 @@ public class NativeAudio
         AudioAsset asset = audioAssetList.get(audioId);
         if (asset != null) {
           call.resolve(
-            new JSObject().put("currentTime", asset.getCurrentPosition())
+                  new JSObject().put("currentTime", asset.getCurrentPosition())
           );
         }
       } else {
@@ -212,15 +226,15 @@ public class NativeAudio
   @PluginMethod
   public void loop(final PluginCall call) {
     getBridge()
-      .getActivity()
-      .runOnUiThread(
-        new Runnable() {
-          @Override
-          public void run() {
-            playOrLoop("loop", call);
-          }
-        }
-      );
+            .getActivity()
+            .runOnUiThread(
+                    new Runnable() {
+                      @Override
+                      public void run() {
+                        playOrLoop("loop", call);
+                      }
+                    }
+            );
   }
 
   @PluginMethod
@@ -237,6 +251,8 @@ public class NativeAudio
           if (wasPlaying) {
             resumeList.add(asset);
           }
+
+          call.resolve();
         }
       } else {
         call.reject(ERROR_ASSET_NOT_LOADED + " - " + audioId);
@@ -257,6 +273,7 @@ public class NativeAudio
         if (asset != null) {
           asset.resume();
           resumeList.add(asset);
+          call.resolve();
         }
       } else {
         call.reject(ERROR_ASSET_NOT_LOADED + " - " + audioId);
@@ -276,6 +293,7 @@ public class NativeAudio
         AudioAsset asset = audioAssetList.get(audioId);
         if (asset != null) {
           asset.stop();
+          call.resolve();
         }
       } else {
         call.reject(ERROR_ASSET_NOT_LOADED + " - " + audioId);
@@ -336,6 +354,7 @@ public class NativeAudio
         AudioAsset asset = audioAssetList.get(audioId);
         if (asset != null) {
           asset.setVolume(volume);
+          call.resolve();
         }
       } else {
         call.reject(ERROR_AUDIO_ASSET_MISSING);
@@ -380,7 +399,6 @@ public class NativeAudio
 
   private void preloadAsset(PluginCall call) {
     double volume = 1.0;
-    int audioChannelNum = 1;
 
     try {
       initSoundPool();
@@ -399,7 +417,7 @@ public class NativeAudio
 
         if (!isStringValid(assetPath)) {
           call.reject(
-            ERROR_ASSET_PATH_MISSING + " - " + audioId + " - " + assetPath
+                  ERROR_ASSET_PATH_MISSING + " - " + audioId + " - " + assetPath
           );
           return;
         }
@@ -412,38 +430,32 @@ public class NativeAudio
           volume = call.getDouble(VOLUME, 0.5);
         }
 
-        if (call.getInt(AUDIO_CHANNEL_NUM) == null) {
-          audioChannelNum = 1;
-        } else {
-          audioChannelNum = call.getInt(AUDIO_CHANNEL_NUM);
-        }
-
         AssetFileDescriptor assetFileDescriptor;
         if (isUrl) {
           File f = new File(new URI(fullPath));
           ParcelFileDescriptor p = ParcelFileDescriptor.open(
-            f,
-            ParcelFileDescriptor.MODE_READ_ONLY
+                  f,
+                  ParcelFileDescriptor.MODE_READ_ONLY
           );
           assetFileDescriptor = new AssetFileDescriptor(p, 0, -1);
         } else {
-          Context ctx = getBridge().getActivity().getApplicationContext();
-          AssetManager am = ctx.getResources().getAssets();
-          assetFileDescriptor = am.openFd(fullPath);
+          if (fullPath.startsWith("content")) {
+            assetFileDescriptor = getBridge().getActivity().getContentResolver().openAssetFileDescriptor(Uri.parse(fullPath), "r");
+          } else {
+            Context ctx = getBridge().getActivity().getApplicationContext();
+            AssetManager am = ctx.getResources().getAssets();
+            assetFileDescriptor = am.openFd(fullPath);
+          }
         }
 
         AudioAsset asset = new AudioAsset(
-          this,
-          audioId,
-          assetFileDescriptor,
-          audioChannelNum,
-          (float) volume
+                this,
+                audioId,
+                assetFileDescriptor,
+                (float) volume
         );
+        call.resolve(new JSObject().put("STATUS", "OK"));
         audioAssetList.put(audioId, asset);
-
-        JSObject status = new JSObject();
-        status.put("STATUS", "OK");
-        call.resolve(status);
       } else {
         call.reject(ERROR_AUDIO_EXISTS);
       }
@@ -457,24 +469,15 @@ public class NativeAudio
       initSoundPool();
 
       final String audioId = call.getString(ASSET_ID);
+      AudioAsset asset = audioAssetList.get(audioId);
+      if (asset == null) {
+        call.reject("Unknown AssetId: " + audioId);
+        return;
+      }
+      // TODO allow null and if null dont seek
       final Double time = call.getDouble("time", 0.0);
       if (audioAssetList.containsKey(audioId)) {
-        AudioAsset asset = audioAssetList.get(audioId);
-        if (LOOP.equals(action) && asset != null) {
-          asset.loop();
-        } else if (asset != null) {
-
-          asset.play(time,
-            new Callable<Void>() {
-              @Override
-              public Void call() throws Exception {
-                call.resolve(new JSObject().put(ASSET_ID, audioId));
-
-                return null;
-              }
-            }
-          );
-        }
+        asset.play(time, LOOP.equals(action), () -> call.resolve(new JSObject().put(ASSET_ID, audioId)));
       }
     } catch (Exception ex) {
       call.reject(ex.getMessage());
